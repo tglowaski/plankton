@@ -9,7 +9,11 @@ read_test_process.csv
 PLAN.md
 .claude/tests/hooks/results/.start_ts
 .claude/tests/hooks/results/archive/
-benchmark/
+benchmark/*
+!benchmark/swebench/
+benchmark/swebench/results/
+benchmark/swebench/patches/
+benchmark/archive/
 reports/
 assets/internal/
 docs/internal/

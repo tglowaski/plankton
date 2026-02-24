@@ -137,7 +137,7 @@ graph TB
     end
 
     subgraph "CI Layer"
-        PRECOMMIT[.pre-commit-config.yaml<br/>15 Hook Phases]
+        PRECOMMIT[.pre-commit-config.yaml<br/>15 Hook IDs]
         GHA[GitHub Actions<br/>lint + test jobs]
     end
 
@@ -165,7 +165,7 @@ graph TB
 
 ### multi_linter.sh (PostToolUse Hook)
 
-- **Location**: `.claude/hooks/multi_linter.sh` (~1,319 lines)
+- **Location**: `.claude/hooks/multi_linter.sh` (~1,484 lines)
 - **Responsibilities**:
   - Dispatches files to language-specific handlers based on extension
   - Runs three-phase lint: format, collect
@@ -209,7 +209,7 @@ graph TB
 
 ### config.json (Runtime Configuration)
 
-- **Location**: `.claude/hooks/config.json` (~81 lines)
+- **Location**: `.claude/hooks/config.json` (~101 lines)
 - **Responsibilities**: Central config for all hooks -
   language toggles, protected files, exclusions,
   phase control, model patterns, jscpd settings,
@@ -245,12 +245,12 @@ graph TB
 
 ### test_hook.sh (Debug/Test Utility)
 
-- **Location**: `.claude/hooks/test_hook.sh` (~1,436 lines)
+- **Location**: `.claude/hooks/test_hook.sh` (~1,495 lines)
 - **Responsibilities**: Self-test suite covering all
   file types, model selection, TS handling, config
   protection, and edge cases
 - **Implementation**: `--self-test` runs tests with
-  `HOOK_SKIP_SUBPROCESS=1` for determinism. 112 cases
+  `HOOK_SKIP_SUBPROCESS=1` for determinism. 113 cases
   including Dockerfile, model selection, TS tests
 
 ## Data Model
@@ -332,7 +332,7 @@ for the full testing PSF covering all 5 test layers, fixtures,
 CI pipeline, and 303+ automated checks.
 
 - **Quick reference**: `bash .claude/hooks/test_hook.sh --self-test`
-  (112 cases), `bash .claude/tests/hooks/verify_feedback_loop.sh`
+  (113 cases), `bash .claude/tests/hooks/verify_feedback_loop.sh`
   (28 checks), `bash tests/stress/run_stress_tests.sh` (133 tests)
 - **Type safety**: Python 3.11+; ty in Phase 2b;
   ruff with 50+ rule categories in preview mode
@@ -369,7 +369,7 @@ CI pipeline, and 303+ automated checks.
 
 ## Risks, Tech Debt, Open Questions
 
-- **Shell script size**: `multi_linter.sh` ~1,319
+- **Shell script size**: `multi_linter.sh` ~1,484
   lines; per-language modules would help
 - **Fragile parsing**: yamllint/flake8/markdownlint
   output parsed via `sed`; format changes break it
@@ -385,32 +385,9 @@ CI pipeline, and 303+ automated checks.
 
 ## Benchmark Subsystem
 
-- **Location**: `benchmark/`
-- **Purpose**: A/B testing of Plankton hooks against EvalPlus
-  HumanEval+ and ClassEval benchmarks to measure hook impact
-  on code generation quality
-- **Components**:
-  - `runner.py` (~582 lines): Orchestrates A/B benchmark runs
-    — condition A (baseline, no hooks via `cc -bare`) vs
-    condition B (hooks active). Produces JSONL files consumable
-    by `evalplus.evaluate`. Supports both HumanEval+ (164 tasks)
-    and ClassEval (20 tasks)
-  - `analyze.py` (~135 lines): Post-benchmark statistical
-    analysis using `scipy.stats.binomtest` for significance
-    testing at α=0.05
-  - `classeval_wrapper.py` (~90 lines): ClassEval benchmark
-    adapter
-  - `evalplus_wrapper.py` (~28 lines): EvalPlus benchmark
-    adapter
-  - `prompt_template.txt` / `classeval_prompt_template.txt`:
-    Prompt templates for each benchmark
-  - `ClassEval_data.json`: ClassEval task definitions
-  - `prereqs.sh`: Prerequisite installation script
-- **Dependencies**: `scipy`, `evalplus`, Claude CLI
-- **Test coverage**: `tests/unit/test_runner.py` (416 lines),
-  `tests/unit/test_analyze.py` (170 lines),
-  `tests/unit/test_benchmark_integration.py` (81 lines)
-- **Spec**: `docs/specs/adr-plankton-benchmark.md`
+See [02-benchmark-swebench.md](02-benchmark-swebench.md)
+for the full benchmark PSF covering all 8 modules, the CLI,
+265 automated tests, and the A/B experiment protocol.
 
 ## Supporting Files
 

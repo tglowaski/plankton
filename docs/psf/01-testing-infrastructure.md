@@ -8,14 +8,14 @@
 - **Scope**: `.claude/hooks/test_hook.sh`, `.claude/tests/hooks/`,
   `tests/stress/`, `.github/workflows/ci.yml`, `.pre-commit-config.yaml`
 - **Key responsibilities**:
-  - Self-test suite (112 cases) for fast per-change validation
+  - Self-test suite (113 cases) for fast per-change validation
   - Standalone harnesses for feedback loop, production path,
     and output channel verification
   - Stress test suite (133 cases) with TAP output and
     markdown report generation
   - CI pipeline: pre-commit (lint) + pytest (test) on push/PR
-- **Test totals**: 112 + 28 + 10 + 20 + 133 = 303 automated
-  checks (+ 103 agent-based integration tests)
+- **Test totals**: 113 + 28 + 10 + 20 + 133 = 304 hook checks
+  (+ 103 agent-based integration tests + 265 pytest tests)
 - **Dependencies**: ShellCheck, ruff, jaq, yamllint, hadolint,
   taplo, markdownlint-cli2; biome optional
 
@@ -34,8 +34,8 @@
   `docs/specs/stress-test-report.md` captures stress results
 - **Operating model**: Hook tests are bash scripts run locally
   or in CI; pytest unit tests cover the benchmark subsystem
-  (`tests/unit/test_runner.py`, `test_analyze.py`,
-  `test_benchmark_integration.py`)
+  (see [02-benchmark-swebench.md](02-benchmark-swebench.md)
+  for the full 265-test breakdown)
 
 ## System Overview
 
@@ -56,7 +56,7 @@
 ```mermaid
 graph TB
     subgraph "Layer 1: Fast Feedback"
-        ST[test_hook.sh --self-test<br/>112 cases]
+        ST[test_hook.sh --self-test<br/>113 cases]
     end
 
     subgraph "Layer 2: Focused Harnesses"
@@ -71,11 +71,11 @@ graph TB
     end
 
     subgraph "Layer 4: Unit Tests"
-        UT[pytest tests/unit/<br/>3 files, benchmark coverage]
+        UT[pytest tests/unit/<br/>9 files, 239 tests, swebench coverage]
     end
 
     subgraph "Layer 5: CI"
-        PC[pre-commit<br/>20 hook phases]
+        PC[pre-commit<br/>15 hook IDs]
         PT[pytest<br/>tests/ directory]
     end
 
@@ -98,9 +98,9 @@ graph TB
 
 ### test_hook.sh (Self-Test Suite)
 
-- **Location**: `.claude/hooks/test_hook.sh` (~1,436 lines)
+- **Location**: `.claude/hooks/test_hook.sh` (~1,495 lines)
 - **Invocation**: `bash .claude/hooks/test_hook.sh --self-test`
-- **Test count**: 112 pass / 0 fail
+- **Test count**: 113 pass / 0 fail
 - **Implementation**: `run_self_test()` orchestrates all tests
   using three helpers: `test_temp_file()` (exit code checks),
   `test_bash_command()` (PM hook JSON I/O), and
@@ -223,7 +223,7 @@ graph TB
 ## Operations
 
 - **Local fast check**: `bash .claude/hooks/test_hook.sh --self-test`
-  (~30s, 112 tests)
+  (~30s, 113 tests)
 - **Full local suite**: Run all 4 harnesses sequentially (~2 min,
   170 tests + 4 skip)
 - **Stress test**: `bash tests/stress/run_stress_tests.sh` (~5 min,
@@ -239,7 +239,7 @@ graph TB
 
 ## Testing & Quality
 
-- **Pre-commit pipeline**: 20 hook phases mirroring CC hook
+- **Pre-commit pipeline**: 15 hook IDs mirroring CC hook
   linters; runs `uv run pre-commit run --all-files`
 - **Agent integration tests**: 103 tests via TeamCreate (3 agents);
   results archived in `.claude/tests/hooks/results/archive/`
@@ -283,9 +283,10 @@ graph TB
 
 ## Risks, Tech Debt, Open Questions
 
-- **Pytest unit tests**: `tests/unit/` contains 3 test files
-  (test_runner.py, test_analyze.py, test_benchmark_integration.py)
-  covering the benchmark subsystem; hook testing remains shell-based
+- **Pytest tests**: `tests/unit/` (9 files, 239 tests) +
+  `tests/integration/` (7 files, 26 tests) = 265 total;
+  see [02-benchmark-swebench.md](02-benchmark-swebench.md)
+  for per-file breakdown; hook testing remains shell-based
 - **Stress test size**: `run_stress_tests.sh` at 2,335 lines
   is complex; per-category modules would help
 - **Agent tests require TeamCreate**: 103 integration tests
