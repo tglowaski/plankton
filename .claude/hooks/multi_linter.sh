@@ -1014,7 +1014,7 @@ case "${file_path}" in
   *.md | *.mdx) file_type="markdown" ;;
   *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts|*.css) file_type="typescript" ;;
   *.vue|*.svelte|*.astro) file_type="typescript" ;;
-  Dockerfile | Dockerfile.* | */Dockerfile | */Dockerfile.* | *.dockerfile) file_type="dockerfile" ;;
+  Dockerfile | Dockerfile.* | */Dockerfile | */Dockerfile.* | *.dockerfile | *.Dockerfile) file_type="dockerfile" ;;
   *) exit 0 ;; # Unsupported
 esac
 
@@ -1309,7 +1309,7 @@ case "${file_path}" in
     fi
     ;;
 
-  Dockerfile | Dockerfile.* | */Dockerfile | */Dockerfile.* | *.dockerfile)
+  Dockerfile | Dockerfile.* | */Dockerfile | */Dockerfile.* | *.dockerfile | *.Dockerfile)
     is_language_enabled "dockerfile" || exit 0
 
     # Dockerfile: hadolint - collect all issues
