@@ -17,13 +17,20 @@ Write-time code quality enforcement for AI coding agents, built on Claude Code h
 ```bash
 git clone https://github.com/alexfazio/plankton.git
 cd plankton
-pip install uv && uv sync --all-extras
-claude                # hooks activate automatically
+bash scripts/setup.sh   # installs all tools (macOS + Linux)
+claude                   # hooks activate automatically
 ```
 
 That's it. Plankton works by being the directory you run Claude Code from.
 The hooks in `.claude/hooks/` are picked up automatically — no install
-command, no plugin, no config. Clone, cd, claude.
+command, no plugin, no config. Clone, setup, claude.
+
+> [!NOTE]
+> **Windows** is not supported. Use
+> [WSL2](https://learn.microsoft.com/en-us/windows/wsl/install) and
+> follow the Linux instructions inside the WSL environment.
+
+<!-- -->
 
 > [!TIP]
 > You can work on any codebase from inside plankton. Just tell Claude:
@@ -53,9 +60,46 @@ echo 'export DISABLE_AUTOUPDATER=1' >> ~/.zshrc && source ~/.zshrc
 curl -fsSL https://claude.ai/install.sh | bash -s stable
 ```
 
-`jaq`, `ruff`, and `uv` are required for all languages. TypeScript also
-needs `biome`. Everything else is optional and gracefully skipped if not
-installed. See [docs/SETUP.md](docs/SETUP.md) for per-language setup.
+`scripts/setup.sh` installs all tools automatically. On macOS it uses
+Homebrew; on Linux it downloads prebuilt binaries (no cargo or go
+required). See [docs/SETUP.md](docs/SETUP.md) for manual per-language
+setup.
+
+<!-- markdownlint-disable MD033 -->
+<details>
+<summary>Manual install (if you prefer not to use the setup script)</summary>
+
+**macOS:**
+
+```bash
+brew install jaq ruff uv shellcheck shfmt hadolint taplo
+brew install oven-sh/bun/bun
+bun install                              # biome, oxlint
+uv sync --all-extras --no-install-project  # Python linting tools
+```
+
+**Linux:**
+
+```bash
+# Core tools (ruff + uv via Astral installers)
+curl -LsSf https://astral.sh/ruff/install.sh | sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Binary tools — see docs/SETUP.md for download URLs
+# jaq, shellcheck, shfmt, hadolint, taplo
+
+# JS runtime + tools
+curl -fsSL https://bun.sh/install | bash
+bun install                              # biome, oxlint
+
+# Python linting tools
+uv sync --all-extras --no-install-project
+```
+
+See [docs/SETUP.md](docs/SETUP.md) for per-language details and download
+URLs.
+</details>
+<!-- markdownlint-enable MD033 -->
 
 ## what is plankton
 
@@ -141,8 +185,8 @@ agents modify linting rules, and more.
 
 ## todos
 
-- should have an install wizard instead of manual setup, a guided script that
-  detects your stack and configures everything
+- `scripts/setup.sh` handles basic setup; a more guided wizard that detects
+  your stack and configures language-specific options would be nice
 - one-click install via Claude Code marketplace would be nice
 - a Claude Code skill for configuration and troubleshooting from inside a
   session

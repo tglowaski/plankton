@@ -1186,14 +1186,14 @@ cannot handle. This section consolidates all subprocess configuration.
 
 ### Invocation
 
-The subprocess CLI call (`multi_linter.sh:549-556`):
+The subprocess CLI call (`multi_linter.sh:549-557`):
 
 ```bash
 local disallowed_flag=()
 if [[ -n "${disallowed_tools}" ]]; then
   disallowed_flag=(--disallowedTools "${disallowed_tools}")
 fi
-${timeout_cmd} "${claude_cmd}" -p "${prompt}" \
+${timeout_cmd} env -u CLAUDECODE "${claude_cmd}" -p "${prompt}" \
   --dangerously-skip-permissions \
   --settings "${settings_file}" \
   "${disallowed_flag[@]}" \
@@ -1204,6 +1204,8 @@ ${timeout_cmd} "${claude_cmd}" -p "${prompt}" \
 
 Key flags:
 
+- `env -u CLAUDECODE` — unsets `CLAUDECODE` before exec to prevent
+  "nested session" error when the hook fires inside a Claude Code session
 - `--dangerously-skip-permissions` — enables headless operation
   (always paired with `--disallowedTools` unless all tools allowed)
 - `--disallowedTools` — blacklist derived per tier (see Tool Scope)

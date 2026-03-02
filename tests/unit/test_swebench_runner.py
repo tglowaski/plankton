@@ -440,6 +440,29 @@ class TestRunAll:
         assert result["aborted"] is False
         assert mock_run_task.call_count == 0
 
+    def test_run_all_forwards_dry_run_to_run_task_fn(self, tmp_path: Path) -> None:
+        """run_all with dry_run=True should forward dry_run=True to run_task_fn."""
+        from benchmark.swebench.runner import run_all
+
+        captured: dict = {}
+
+        def spy_run_task(task, **kwargs):
+            captured.update(kwargs)
+            return {"task_id": task["instance_id"], "conditions": {}}
+
+        tasks = [{"instance_id": "t1", "repo_dir": str(tmp_path)}]
+        run_all(
+            tasks,
+            seed=1,
+            model="m",
+            timeout=60,
+            results_dir=tmp_path / "r",
+            patches_dir=tmp_path / "p",
+            run_task_fn=spy_run_task,
+            dry_run=True,
+        )
+        assert captured.get("dry_run") is True, "dry_run must be forwarded to run_task_fn"
+
     def test_run_task_includes_metadata_in_summary(self, tmp_path: Path) -> None:
         """Verify run_task preserves metadata in the result summary."""
         from benchmark.swebench.runner import run_task
@@ -1068,3 +1091,41 @@ class TestTasksSkipped:
             run_task_fn=mock_run_task,
         )
         assert result["tasks_skipped"] == 0
+
+
+# --- dry_run forwarding through run_task ---
+
+
+class TestRunTaskDryRun:
+    """Test dry_run flag forwarding through run_task."""
+
+    def test_run_task_forwards_dry_run(self, tmp_path, monkeypatch) -> None:
+        """run_task(dry_run=True) must pass dry_run=True to the solve function."""
+        import benchmark.swebench.runner as runner_mod
+        from benchmark.swebench.runner import run_task
+
+        captured: dict = {}
+
+        def fake_solve(task, *, condition, model, timeout, **kwargs):
+            captured.update(kwargs)
+            return {"patch": "diff", "condition": condition, "passed": None, "metadata": {}}
+
+        task = {"instance_id": "t1", "problem_statement": "fix", "repo_dir": str(tmp_path)}
+        (tmp_path / ".git").mkdir()
+
+        monkeypatch.setattr(runner_mod, "reset_repo", lambda *a, **k: None)
+        monkeypatch.setattr(runner_mod, "inject_hooks", lambda *a, **k: None)
+        monkeypatch.setattr(runner_mod, "remove_hooks", lambda *a, **k: None)
+
+        run_task(
+            task,
+            seed=42,
+            model="m",
+            timeout=30,
+            results_dir=tmp_path / "r",
+            patches_dir=tmp_path / "p",
+            solve_fn=fake_solve,
+            dry_run=True,
+        )
+
+        assert captured.get("dry_run") is True, "dry_run must be forwarded to solve_fn"

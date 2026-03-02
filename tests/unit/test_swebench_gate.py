@@ -174,6 +174,34 @@ class TestCheckHookActivity:
         assert result.passed is False
         assert "cannot verify" in result.detail.lower()
 
+    def test_all_dry_run_metadata_returns_passed(self) -> None:
+        """check_hook_activity with all dry-run metadata returns passed."""
+        from benchmark.swebench.gate import check_hook_activity
+
+        task_results = [
+            {
+                "task_id": "t1",
+                "conditions": {"plankton": {"metadata": {"dry_run": True}}},
+            }
+        ]
+        result = check_hook_activity(task_results)
+        assert result.passed is True
+        assert "skipped" in result.detail.lower()
+
+    def test_mixed_dry_run_and_real_evaluates_normally(self) -> None:
+        """check_hook_activity with mixed dry-run and real results evaluates normally."""
+        from benchmark.swebench.gate import check_hook_activity
+
+        task_results = [
+            {
+                "task_id": "t1",
+                "conditions": {"plankton": {"metadata": {"dry_run": True}}},
+            },
+            _make_task_result(task_id="t2", plankton_claude_output="PostToolUse event"),
+        ]
+        result = check_hook_activity(task_results)
+        assert result.passed is True
+
 
 # ── Criterion 4: check_eval_harness_verdicts ─────────────────────────
 
@@ -371,3 +399,95 @@ class TestFormatGateReport:
         )
         report = format_gate_report(result)
         assert "broken thing" in report
+
+
+# --- dry_run and skip_eval wiring in run_gate ---
+
+
+class TestRunGateDryRunSkipEval:
+    """Test dry_run and skip_eval flag wiring in run_gate."""
+
+    def _minimal_task(self, tmp_path, idx: int = 0) -> dict:
+        return {
+            "instance_id": f"task_{idx}",
+            "problem_statement": "fix it",
+            "repo_dir": str(tmp_path),
+        }
+
+    def _stub_run_task(self, *, passed_value=None, captured=None):
+        """Returns a fake run_task that records kwargs and returns a fixed result."""
+
+        def _run(task, **kwargs):
+            if captured is not None:
+                captured.update(kwargs)
+            task_id = task["instance_id"]
+            return {
+                "task_id": task_id,
+                "conditions": {
+                    "baseline": {"patch": "diff", "passed": passed_value, "metadata": {}},
+                    "plankton": {"patch": "diff2", "passed": passed_value, "metadata": {}},
+                },
+            }
+
+        return _run
+
+    def test_run_gate_forwards_dry_run(self, tmp_path) -> None:
+        """run_gate with GateConfig(dry_run=True) must pass dry_run=True to run_task_fn."""
+        from benchmark.swebench.gate import GateConfig, run_gate
+
+        captured: dict = {}
+        config = GateConfig(
+            seed=1,
+            model="m",
+            timeout=30,
+            results_dir=tmp_path / "r",
+            patches_dir=tmp_path / "p",
+            dry_run=True,
+        )
+        run_gate(
+            [self._minimal_task(tmp_path)],
+            config,
+            run_task_fn=self._stub_run_task(captured=captured),
+        )
+        assert captured.get("dry_run") is True, "run_gate must forward dry_run=True to run_task_fn"
+
+    def test_run_gate_skip_eval_marks_criterion4_skipped(self, tmp_path) -> None:
+        """GateConfig(skip_eval=True) marks criterion 4 passed with 'skipped' in detail."""
+        from benchmark.swebench.gate import GateConfig, run_gate
+
+        config = GateConfig(
+            seed=1,
+            model="m",
+            timeout=30,
+            results_dir=tmp_path / "r",
+            patches_dir=tmp_path / "p",
+            skip_eval=True,
+        )
+        # passed=None would normally fail criterion 4
+        result = run_gate(
+            [self._minimal_task(tmp_path)],
+            config,
+            run_task_fn=self._stub_run_task(passed_value=None),
+        )
+        c4 = next(c for c in result.criteria if c.name == "eval_harness_verdicts")
+        assert c4.passed is True
+        assert "skipped" in c4.detail.lower()
+
+    def test_run_gate_without_skip_eval_fails_criterion4_when_passed_none(self, tmp_path) -> None:
+        """Default GateConfig (skip_eval=False) fails criterion 4 when passed=None."""
+        from benchmark.swebench.gate import GateConfig, run_gate
+
+        config = GateConfig(
+            seed=1,
+            model="m",
+            timeout=30,
+            results_dir=tmp_path / "r",
+            patches_dir=tmp_path / "p",
+        )
+        result = run_gate(
+            [self._minimal_task(tmp_path)],
+            config,
+            run_task_fn=self._stub_run_task(passed_value=None),
+        )
+        c4 = next(c for c in result.criteria if c.name == "eval_harness_verdicts")
+        assert c4.passed is False

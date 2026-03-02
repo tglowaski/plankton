@@ -539,3 +539,105 @@ def test_baseline_zero_hooks_claude_not_found(monkeypatch):
     r = check_baseline_zero_hooks()
     assert r.passed is False
     assert "not found" in r.detail
+
+
+# --- Test 39: check_tty_workaround subprocess.run must include timeout ---
+def test_tty_workaround_default_run_fn_has_timeout(monkeypatch):
+    """The default run_fn passed to subprocess.run must specify a timeout."""
+    import subprocess
+
+    from benchmark.swebench.prereqs import check_tty_workaround
+
+    monkeypatch.setattr("benchmark.swebench.prereqs.shutil.which", lambda x: "/usr/bin/" + x)
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="hi", stderr="")
+
+    monkeypatch.setattr("benchmark.swebench.prereqs.subprocess.run", fake_run)
+    check_tty_workaround()
+    assert "timeout" in captured, "subprocess.run must be called with a timeout="
+
+
+# --- Test 40: check_large_stdin subprocess.run must include timeout ---
+def test_large_stdin_default_run_fn_has_timeout(monkeypatch):
+    """The default run_fn passed to subprocess.run must specify a timeout."""
+    import subprocess
+
+    from benchmark.swebench.prereqs import check_large_stdin
+
+    monkeypatch.setattr("benchmark.swebench.prereqs.shutil.which", lambda x: "/usr/bin/claude")
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout="hi", stderr="")
+
+    monkeypatch.setattr("benchmark.swebench.prereqs.subprocess.run", fake_run)
+    check_large_stdin()
+    assert "timeout" in captured, "subprocess.run must be called with a timeout="
+
+
+# --- Test 41: check_tool_blocklist_enforcement subprocess.run must include timeout ---
+def test_tool_blocklist_default_run_fn_has_timeout(monkeypatch):
+    """The default run_fn passed to subprocess.run must specify a timeout."""
+    import subprocess
+
+    from benchmark.swebench.prereqs import check_tool_blocklist_enforcement
+
+    monkeypatch.setattr("benchmark.swebench.prereqs.shutil.which", lambda x: "/usr/bin/claude")
+    captured: dict = {}
+
+    def fake_run(cmd, **kwargs):
+        captured.update(kwargs)
+        return subprocess.CompletedProcess(cmd, 0, stdout='{"type":"result"}', stderr="")
+
+    monkeypatch.setattr("benchmark.swebench.prereqs.subprocess.run", fake_run)
+    check_tool_blocklist_enforcement()
+    assert "timeout" in captured, "subprocess.run must be called with a timeout="
+
+
+# --- Test 42: check_tty_workaround handles TimeoutExpired gracefully ---
+def test_tty_workaround_timeout_returns_fail():
+    """If the subprocess times out, check_tty_workaround should return passed=False."""
+    import subprocess
+
+    from benchmark.swebench.prereqs import check_tty_workaround
+
+    def hanging_run():
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=30)
+
+    r = check_tty_workaround(run_fn=hanging_run)
+    assert r.passed is False
+    assert "timeout" in r.detail.lower()
+
+
+# --- Test 43: check_large_stdin handles TimeoutExpired gracefully ---
+def test_large_stdin_timeout_returns_fail():
+    """If the subprocess times out, check_large_stdin should return passed=False."""
+    import subprocess
+
+    from benchmark.swebench.prereqs import check_large_stdin
+
+    def hanging_run():
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=30)
+
+    r = check_large_stdin(run_fn=hanging_run)
+    assert r.passed is False
+    assert "timeout" in r.detail.lower()
+
+
+# --- Test 44: check_tool_blocklist_enforcement handles TimeoutExpired gracefully ---
+def test_tool_blocklist_timeout_returns_fail():
+    """If the subprocess times out, check_tool_blocklist_enforcement returns passed=False."""
+    import subprocess
+
+    from benchmark.swebench.prereqs import check_tool_blocklist_enforcement
+
+    def hanging_run():
+        raise subprocess.TimeoutExpired(cmd="claude", timeout=30)
+
+    r = check_tool_blocklist_enforcement(run_fn=hanging_run)
+    assert r.passed is False
+    assert "timeout" in r.detail.lower()

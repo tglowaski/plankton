@@ -78,6 +78,8 @@ class TestGateCmdEndToEnd:
             model="test-model",
             timeout=60,
             no_checkout=True,
+            dry_run=False,
+            skip_eval=False,
         )
 
         gate_result = self._make_gate_result(passed=True, results_dir=tmp_path / "results")
@@ -109,6 +111,8 @@ class TestGateCmdEndToEnd:
             model="test-model",
             timeout=60,
             no_checkout=True,
+            dry_run=False,
+            skip_eval=False,
         )
 
         gate_result = self._make_gate_result(passed=False, results_dir=tmp_path / "results")
@@ -140,6 +144,8 @@ class TestGateCmdEndToEnd:
             model="test-model",
             timeout=60,
             no_checkout=True,
+            dry_run=False,
+            skip_eval=False,
         )
 
         captured_tasks = []
@@ -191,6 +197,7 @@ class TestRunCmdEndToEnd:
             timeout=60,
             no_checkout=True,
             resume=False,
+            dry_run=False,
         )
 
         run_all_result = {
@@ -225,6 +232,7 @@ class TestRunCmdEndToEnd:
             timeout=60,
             no_checkout=True,
             resume=False,
+            dry_run=False,
         )
 
         run_all_result = {
@@ -241,3 +249,99 @@ class TestRunCmdEndToEnd:
 
         captured = capsys.readouterr()
         assert "ABORTED" in captured.out
+
+
+# ---------------------------------------------------------------------------
+# Step 5/6/7: --dry-run / --skip-eval CLI wiring
+# ---------------------------------------------------------------------------
+
+
+class TestDryRunCliWiring:
+    """Tests that --dry-run and --skip-eval flags are wired end-to-end."""
+
+    def test_parse_run_dry_run_flag(self, tmp_path):
+        """Parse 'run ... --dry-run' should set args.dry_run=True."""
+        tasks_file = tmp_path / "tasks.jsonl"
+        tasks_file.touch()
+        args = _build_parser().parse_args(
+            ["run", "--repos-dir", str(tmp_path), "--tasks-jsonl", str(tasks_file), "--dry-run"]
+        )
+        assert args.dry_run is True
+
+    def test_parse_gate_dry_run_and_skip_eval_flags(self, tmp_path):
+        """Parse 'gate ... --dry-run --skip-eval' should set both flags."""
+        tasks_file = tmp_path / "tasks.jsonl"
+        tasks_file.touch()
+        args = _build_parser().parse_args(
+            ["gate", "--repos-dir", str(tmp_path), "--tasks-jsonl", str(tasks_file), "--dry-run", "--skip-eval"]
+        )
+        assert args.dry_run is True
+        assert args.skip_eval is True
+
+    def test_gate_cmd_forwards_dry_run_and_skip_eval_to_gate_config(self, tmp_path, fake_task, write_tasks_jsonl):
+        """Gate CLI --dry-run and --skip-eval parse to GateConfig fields correctly."""
+        tasks = [fake_task("t1"), fake_task("t2")]
+        jsonl_path = write_tasks_jsonl(tasks)
+        args = argparse.Namespace(
+            tasks_jsonl=jsonl_path,
+            tasks_hf=None,
+            instance_ids=None,
+            difficulties=None,
+            repos_dir=tmp_path,
+            results_dir=tmp_path / "results",
+            seed=42,
+            model="test-model",
+            timeout=60,
+            no_checkout=True,
+            dry_run=True,
+            skip_eval=True,
+        )
+        captured_config = {}
+
+        def spy_run_gate(tasks_arg, config, **kw):
+            captured_config["config"] = config
+            criteria = [CriterionResult(name="stub", passed=True, detail="ok")]
+            return GateResult(
+                passed=True,
+                criteria=criteria,
+                tasks_run=len(tasks_arg),
+                wall_time_s=1.0,
+                results_dir=config.results_dir,
+            )
+
+        with patch("benchmark.swebench.gate.run_gate", side_effect=spy_run_gate):
+            with pytest.raises(SystemExit):
+                _run_gate_cmd(args)
+
+        assert captured_config["config"].dry_run is True
+        assert captured_config["config"].skip_eval is True
+
+    def test_run_cmd_forwards_dry_run_to_run_all(self, tmp_path, fake_task, write_tasks_jsonl):
+        """Run CLI --dry-run is forwarded to run_all."""
+        tasks = [fake_task("t1")]
+        jsonl_path = write_tasks_jsonl(tasks)
+        args = argparse.Namespace(
+            tasks_jsonl=jsonl_path,
+            tasks_hf=None,
+            instance_ids=None,
+            difficulties=None,
+            repos_dir=tmp_path,
+            results_dir=tmp_path / "results",
+            seed=42,
+            model="test-model",
+            timeout=60,
+            no_checkout=True,
+            resume=False,
+            dry_run=True,
+        )
+        captured_kwargs: dict = {}
+
+        def spy_run_all(*args, **kwargs):
+            captured_kwargs.update(kwargs)
+            return {"aborted": False, "abort_reason": None, "tasks_completed": 1, "tasks_skipped": 0}
+
+        with patch("benchmark.swebench.runner.run_all", side_effect=spy_run_all):
+            with pytest.raises(SystemExit):
+                _run_all_cmd(args)
+
+        assert captured_kwargs.get("dry_run") is True

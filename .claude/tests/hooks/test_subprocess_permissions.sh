@@ -141,6 +141,45 @@ assert "test1c_invariant" \
   "skip-permissions implies disallowedTools" \
   "SAFETY VIOLATION: --dangerously-skip-permissions without --disallowedTools"
 
+# ============================================================================
+# Test 1d: CLAUDECODE env var is unset before subprocess invocation
+# ============================================================================
+printf "\n--- test1d: env -u CLAUDECODE present in subprocess invocation ---\n"
+
+# Mock claude that logs its environment to a file
+test1d_dir="${tmp_dir}/test1d"
+mkdir -p "${test1d_dir}/bin"
+
+test1d_env="${test1d_dir}/claude_env.txt"
+cat >"${test1d_dir}/bin/claude" <<MOCK_EOF
+#!/bin/bash
+env > "${test1d_env}"
+printf '%s\n' "\$@" >> "${test1d_env}"
+exit 0
+MOCK_EOF
+chmod +x "${test1d_dir}/bin/claude"
+
+setup_project_dir "${test1d_dir}/project" '{"phases":{"subprocess_delegation":true}}'
+
+test1d_file="${test1d_dir}/test.sh"
+create_bad_shell_file "${test1d_file}"
+
+test1d_json='{"tool_input":{"file_path":"'"${test1d_file}"'"}}'
+
+export CLAUDECODE=1 # simulate being inside CC session
+export test1d_exit=0
+echo "${test1d_json}" \
+  | PATH="${test1d_dir}/bin:${PATH}" \
+    CLAUDE_PROJECT_DIR="${test1d_dir}/project" \
+    HOOK_SESSION_PID="test1d_$$" \
+    bash "${hook_dir}/multi_linter.sh" >/dev/null 2>&1 || test1d_exit=$?
+unset CLAUDECODE
+
+assert "test1d_claudecode_unset" \
+  "! grep -q '^CLAUDECODE=' '${test1d_env}'" \
+  "CLAUDECODE is NOT in subprocess env (correct)" \
+  "CLAUDECODE still present in subprocess env (bug: env -u CLAUDECODE missing)"
+
 # === Summary ===
 printf "\n=== Summary ===\n"
 printf "Passed: %d\nFailed: %d\n" "${passed}" "${failed}"

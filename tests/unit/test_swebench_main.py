@@ -143,6 +143,8 @@ class TestRunGateCmd:
             timeout=1800,
             results_dir=Path("/tmp/r"),
             repos_dir=Path("/tmp"),
+            dry_run=False,
+            skip_eval=False,
         )
         with pytest.raises(SystemExit) as exc_info:
             _run_gate_cmd(args)
@@ -171,6 +173,8 @@ class TestRunGateCmd:
             timeout=1800,
             results_dir=Path("/tmp/r"),
             repos_dir=Path("/tmp"),
+            dry_run=False,
+            skip_eval=False,
         )
         with pytest.raises(SystemExit) as exc_info:
             _run_gate_cmd(args)
@@ -199,6 +203,7 @@ class TestRunAllCmd:
             results_dir=Path("/tmp/r"),
             repos_dir=Path("/tmp"),
             resume=False,
+            dry_run=False,
         )
         with pytest.raises(SystemExit) as exc_info:
             _run_all_cmd(args)
@@ -225,6 +230,7 @@ class TestRunAllCmd:
             results_dir=Path("/tmp/r"),
             repos_dir=Path("/tmp"),
             resume=False,
+            dry_run=False,
         )
         with pytest.raises(SystemExit) as exc_info:
             _run_all_cmd(args)
@@ -247,6 +253,7 @@ class TestRunAllCmd:
             results_dir=Path("/tmp/r"),
             repos_dir=Path("/tmp"),
             resume=True,
+            dry_run=False,
         )
         with pytest.raises(SystemExit):
             _run_all_cmd(args)

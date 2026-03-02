@@ -165,7 +165,7 @@ graph TB
 
 ### multi_linter.sh (PostToolUse Hook)
 
-- **Location**: `.claude/hooks/multi_linter.sh` (~1,484 lines)
+- **Location**: `.claude/hooks/multi_linter.sh` (~1,486 lines)
 - **Responsibilities**:
   - Dispatches files to language-specific handlers based on extension
   - Runs three-phase lint: format, collect
@@ -209,7 +209,7 @@ graph TB
 
 ### config.json (Runtime Configuration)
 
-- **Location**: `.claude/hooks/config.json` (~101 lines)
+- **Location**: `.claude/hooks/config.json` (~116 lines)
 - **Responsibilities**: Central config for all hooks -
   language toggles, protected files, exclusions,
   phase control, model patterns, jscpd settings,
@@ -333,7 +333,10 @@ CI pipeline, and 303+ automated checks.
 
 - **Quick reference**: `bash .claude/hooks/test_hook.sh --self-test`
   (113 cases), `bash .claude/tests/hooks/verify_feedback_loop.sh`
-  (28 checks), `bash tests/stress/run_stress_tests.sh` (133 tests)
+  (28 checks), `bash tests/stress/run_stress_tests.sh` (133 tests),
+  `.venv/bin/pytest tests/` (286 tests: 256 unit + 30 integration);
+  hook investigation tests: `test_nursery_config.sh` (3 tests),
+  `test_env_propagation.sh` (3 tests), `test_subprocess_permissions.sh` (5 tests)
 - **Type safety**: Python 3.11+; ty in Phase 2b;
   ruff with 50+ rule categories in preview mode
 - **Shell quality**: ShellCheck max enforcement
@@ -369,7 +372,7 @@ CI pipeline, and 303+ automated checks.
 
 ## Risks, Tech Debt, Open Questions
 
-- **Shell script size**: `multi_linter.sh` ~1,484
+- **Shell script size**: `multi_linter.sh` ~1,486
   lines; per-language modules would help
 - **Fragile parsing**: yamllint/flake8/markdownlint
   output parsed via `sed`; format changes break it
@@ -387,7 +390,7 @@ CI pipeline, and 303+ automated checks.
 
 See [02-benchmark-swebench.md](02-benchmark-swebench.md)
 for the full benchmark PSF covering all 8 modules, the CLI,
-265 automated tests, and the A/B experiment protocol.
+286 automated tests, and the A/B experiment protocol.
 
 ## Supporting Files
 
@@ -413,6 +416,15 @@ for the full benchmark PSF covering all 8 modules, the CLI,
   Root cause investigation of PostToolUse silent drop hypothesis
 - **`docs/specs/posttooluse-issue/cc-trace/`**: mitmproxy
   trace scripts and JSONL evidence used in investigation
+- **`docs/specs/hook-investigation/hook-glm-dsp-investigation.md`**:
+  Comprehensive hook investigation covering CLAUDECODE guard fix
+  (`env -u CLAUDECODE` at line 555), biome.json correction
+  (removed invalid `"all": true`), and nursery validation guard
+  (object/array short-circuit at line 872)
+- **`docs/specs/hook-investigation/e2e-phase2-commands.md`**:
+  End-to-end verification commands for Phase 2 hook testing
+- **`docs/specs/hook-investigation/e2e-verification-runbook.md`**:
+  Step-by-step E2E runbook for hook pipeline verification
 - **`docs/specs/stress-test-report.md`**: Results from hook
   stress testing
 - **`docs/specs/portable-hooks-template.md`**: Template

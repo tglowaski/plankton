@@ -5,8 +5,8 @@
 - **Purpose**: Paired A/B benchmark measuring Plankton hook
   impact on SWE-bench task resolution via Claude Code
 - **Scope**: `benchmark/swebench/` (8 Python modules + CLI),
-  `tests/unit/` (9 files, 239 tests),
-  `tests/integration/` (7 files, 26 tests)
+  `tests/unit/` (10 files, 256 tests),
+  `tests/integration/` (7 files, 30 tests)
 - **Key responsibilities**:
   - Drive Claude CLI to solve SWE-bench tasks under two
     conditions: `baseline` (bare, no hooks) vs `plankton`
@@ -54,7 +54,7 @@ graph TB
 
     AN[analyze.py<br/>McNemar statistics] --- SCIPY[scipy]
 
-    INIT[__init__.py<br/>35 re-exports] --> CLI
+    INIT[__init__.py<br/>21 re-exports] --> CLI
     INIT --> A
     INIT --> R
     INIT --> G
@@ -102,11 +102,11 @@ graph TD
 
 ### agent.py (Claude Subprocess Wrapper)
 
-- **Location**: `benchmark/swebench/agent.py` (~201 lines)
+- **Location**: `benchmark/swebench/agent.py` (~215 lines)
 - **Responsibilities**: Spawn `claude -p` per task, extract
   patches, parse output, handle TTY workaround
 - **Public API**: `solve(input_data, *, condition, model,
-  timeout) -> dict`
+  timeout, dry_run=False) -> dict`
 - **Implementation**:
   - Writes prompt to `.swebench_prompt.txt` (large-stdin
     workaround via `cat | claude`)
@@ -121,17 +121,19 @@ graph TD
     `error_type=infra` when returncode != 0 AND JSON invalid
   - Cost tracking: extracts `cost_usd` from top-level or
     nested `usage.cost_usd`
+  - `dry_run=True`: skips `git rev-parse HEAD` and Claude
+    subprocess; returns stub result with `metadata.dry_run=True`
 - **Conditions**: `baseline` (bare, no hooks) vs `plankton`
   (hooks active); raises `ValueError` on unknown condition
 
 ### runner.py (A/B Orchestration)
 
-- **Location**: `benchmark/swebench/runner.py` (~327 lines)
+- **Location**: `benchmark/swebench/runner.py` (~329 lines)
 - **Responsibilities**: Paired A/B runs, hook management,
   JSONL persistence, abort criteria, resume support
 - **Public API**:
   - `run_task(task, *, seed, model, ...) -> dict`
-  - `run_all(tasks, *, seed, model, ...) -> dict`
+  - `run_all(tasks, *, seed, model, ..., dry_run=False) -> dict`
   - `flip_order(task_id, seed) -> tuple[str, str]`
   - `inject_hooks(task_dir, plankton_root)`
   - `remove_hooks(task_dir)`
@@ -154,7 +156,7 @@ graph TD
 
 ### gate.py (Validation Gate)
 
-- **Location**: `benchmark/swebench/gate.py` (~275 lines)
+- **Location**: `benchmark/swebench/gate.py` (~300 lines)
 - **Responsibilities**: 2-task dry run with 6 automated
   criteria before full benchmark run
 - **Public API**:
@@ -163,11 +165,15 @@ graph TD
 - **6 criteria**:
   1. No crash or timeout (no `error_type=infra`)
   2. Patches non-empty
-  3. Hook activity (PostToolUse/hook/linter in output)
-  4. Eval harness verdicts populated (deferred if not run)
+  3. Hook activity (PostToolUse/hook/linter in output;
+     skipped when all plankton conditions are dry-run stubs)
+  4. Eval harness verdicts populated (deferred if not run;
+     skippable via `skip_eval` config flag)
   5. Patches differ between conditions (at least 1 task)
   6. Cost and time within bounds (wall < 7200s, cost < $5)
-- **Dataclasses**: `CriterionResult`, `GateConfig`, `GateResult`
+- **Dataclasses**: `CriterionResult`, `GateConfig` (with
+  `dry_run: bool = False`, `skip_eval: bool = False`),
+  `GateResult`
 
 ### analyze.py (Statistical Analysis)
 
@@ -190,7 +196,7 @@ graph TD
 
 ### prereqs.py (Phase 0 Checks)
 
-- **Location**: `benchmark/swebench/prereqs.py` (~379 lines)
+- **Location**: `benchmark/swebench/prereqs.py` (~391 lines)
 - **Responsibilities**: Validate environment before benchmark
   execution — 11 static checks + 4 optional live checks
 - **Public API**:
@@ -239,20 +245,21 @@ graph TD
 
 ### \_\_main\_\_.py (CLI)
 
-- **Location**: `benchmark/swebench/__main__.py` (~115 lines)
+- **Location**: `benchmark/swebench/__main__.py` (~120 lines)
 - **Invocation**: `python -m benchmark.swebench {gate,run,prereqs}`
 - **Subcommands**:
-  - `gate`: 2-task validation → exit 0/1
+  - `gate`: 2-task validation → exit 0/1 (extra: `--skip-eval`)
   - `run`: Full A/B benchmark with `--resume` support → exit 0/1
   - `prereqs`: Phase 0 checks with optional `--full` → exit 0/1
 - **Shared flags**: `--repos-dir`, `--tasks-jsonl`, `--tasks-hf`,
   `--instance-ids`, `--difficulties`, `--seed` (default 42),
-  `--model`, `--timeout`, `--no-checkout`, `--results-dir`
+  `--model`, `--timeout`, `--no-checkout`, `--dry-run`,
+  `--results-dir`
 
 ### \_\_init\_\_.py (Package Facade)
 
 - **Location**: `benchmark/swebench/__init__.py` (~35 lines)
-- **Exports**: 35 symbols in `__all__` covering all public API
+- **Exports**: 21 symbols in `__all__` covering all public API
   from all 6 sibling modules
 
 ## Data Model
@@ -267,31 +274,32 @@ graph TD
 - **PrereqResult**: `dataclass(name, passed, detail, step)`
 - **CriterionResult**: `dataclass(name, passed, detail)`
 - **GateConfig**: `dataclass(seed, model, timeout,
-  results_dir, patches_dir)`
+  results_dir, patches_dir, dry_run, skip_eval)`
 - **GateResult**: `dataclass(passed, criteria, tasks_run,
   wall_time_s, results_dir)`
 
 ## Test Coverage
 
-### Unit Tests (239 tests, 9 files)
+### Unit Tests (256 tests, 10 files)
 
 | File | Tests | Coverage |
 | --- | --- | --- |
-| `test_swebench_runner.py` | 47 | flip, reset, hooks, abort, resume, safety |
-| `test_swebench_prereqs.py` | 47 | 15 checks, run_all, format, version |
-| `test_swebench_agent.py` | 33 | cmd, solve, parse, patch, cost, errors |
-| `test_swebench_gate.py` | 28 | 6 criteria, run_gate, format_gate_report |
+| `test_swebench_prereqs.py` | 53 | 15 checks, run_all, format, version |
+| `test_swebench_runner.py` | 49 | flip, reset, hooks, abort, resume, dry_run |
+| `test_swebench_agent.py` | 36 | cmd, solve, parse, patch, cost, dry_run |
+| `test_swebench_gate.py` | 33 | 6 criteria, run_gate, format, dry_run |
 | `test_hal_adapter.py` | 26 | dispatch, hooks, errors, metadata, validation |
 | `test_swebench_tasks.py` | 21 | JSONL/HF loading, select, checkout, prepare |
 | `test_swebench_analyze.py` | 18 | McNemar, paired, report, validation |
 | `test_swebench_main.py` | 17 | parser, dispatch, exit codes, resume |
 | `test_swebench_integration.py` | 2 | package exports, end-to-end mock |
+| `test_smoke.py` | 1 | import smoke test |
 
-### Integration Tests (26 tests, 7 files)
+### Integration Tests (30 tests, 7 files)
 
 | File | Tests | Coverage |
 | --- | --- | --- |
-| `test_cli_wiring.py` | 8 | CLI dispatch, gate/run end-to-end, missing args |
+| `test_cli_wiring.py` | 12 | CLI dispatch, gate/run end-to-end, dry_run/skip |
 | `test_abort_wiring.py` | 4 | consecutive empty, infra rate, exceptions |
 | `test_task_validation.py` | 4 | missing fields, custom checkout_fn |
 | `test_resume_flow.py` | 3 | skip completed, partial not skipped, full cycle |
@@ -312,7 +320,7 @@ graph TD
 - **Gate run**: `python -m benchmark.swebench gate --repos-dir DIR`
 - **Full run**: `python -m benchmark.swebench run --repos-dir DIR`
 - **Resume**: `python -m benchmark.swebench run --repos-dir DIR --resume`
-- **Tests**: `.venv/bin/python -m pytest tests -x -v` (265 tests)
+- **Tests**: `.venv/bin/python -m pytest tests -x -v` (286 tests)
 - **HAL harness**: `hal-eval` with `hal_adapter.run` entry point
 
 ## Archive
@@ -329,8 +337,9 @@ graph TD
 
 - **No eval harness in CI**: `hal-eval`/`sb` not available
   in GitHub Actions; gate and run tests use mocked solve
-- **scipy dependency**: Only needed for `analyze.py`; could
-  be made optional with lazy import
+- **Benchmark deps isolated**: `scipy`, `datasets`,
+  `evalplus` in `[dependency-groups] benchmark` (PEP 735);
+  `dev` group includes them via `include-group`
 - **prereqs.sh parallel**: Bash `prereqs.sh` (337 lines)
   duplicates Python `prereqs.py` with slight differences
   (shell alias check, concurrency probe); consider removing
