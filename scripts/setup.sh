@@ -27,12 +27,27 @@ need_cmd() {
   return 0
 }
 
-# Fetch latest GitHub release binary URL matching a pattern
+# Fetch latest GitHub release binary URL matching a pattern (retries once)
 github_release_url() {
   local repo="$1" pattern="$2"
-  curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
-    | grep -o "\"browser_download_url\": \"[^\"]*${pattern}[^\"]*\"" \
-    | head -1 | cut -d'"' -f4
+  local url="" attempt
+  for attempt in 1 2; do
+    url=$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest" \
+      | grep -o "\"browser_download_url\": \"[^\"]*${pattern}[^\"]*\"" \
+      | head -1 | cut -d'"' -f4 || true)
+    [[ -n "${url}" ]] && break
+    if [[ ${attempt} -eq 1 ]]; then
+      info "GitHub API failed for ${repo}, retrying in 2s..."
+      sleep 2
+    fi
+  done
+  if [[ -z "${url}" ]]; then
+    fail "Could not fetch release URL for ${repo} (pattern: ${pattern})"
+    fail "Possible causes: GitHub API rate limit (60/hr unauthenticated), network error, or changed release assets"
+    fail "Fix: wait a few minutes and retry, or export GITHUB_TOKEN to increase the rate limit"
+    exit 1
+  fi
+  echo "${url}"
 }
 
 # Download a binary to BIN_DIR and make executable
