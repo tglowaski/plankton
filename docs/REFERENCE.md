@@ -1339,7 +1339,7 @@ use a different settings file (e.g., for Z.AI provider routing):
 ```json
 {
   "subprocess": {
-    "settings_file": "~/.claude/glm-no-hooks-settings.json"
+    "settings_file": "~/.claude/custom-subprocess-settings.json"
   }
 }
 ```

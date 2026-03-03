@@ -669,8 +669,7 @@ if [[ "${py_mode}" != "off" && "${cmd}" =~ ${WB_START}uv[[:space:]]+pip ]]; then
 fi
 
 # Phase 1: Scan for ALL blocked PMs across entire compound command
-scan_compound_command
-scan_result=$?
+scan_compound_command && scan_result=0 || scan_result=$?
 if [[ "${HOOK_DEBUG_PM:-0}" == "1" ]]; then
   echo "[hook:debug] scan_result=${scan_result}, BLOCKED_PMS count=${#BLOCKED_PMS[@]}" >&2
 fi

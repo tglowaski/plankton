@@ -586,6 +586,7 @@ SETTINGS_EOF
   subprocess_exit=0
   ${timeout_cmd} env -u CLAUDECODE "${claude_cmd}" -p "${prompt}" \
     --dangerously-skip-permissions \
+    --setting-sources "" \
     --settings "${settings_file}" \
     "${disallowed_flag[@]}" \
     --max-turns "${tier_max_turns}" \

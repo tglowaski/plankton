@@ -226,7 +226,7 @@ printf "\n--- test2d: no remaining no-hooks-settings references ---\n"
 nohooks_files=$(grep -r --include='*.sh' --include='*.json' --include='*.md' \
   'no-hooks-settings' "${project_dir}" \
   --exclude-dir=.git --exclude-dir=node_modules \
-  --exclude-dir=__pycache__ --exclude-dir=.venv \
+  --exclude-dir=__pycache__ --exclude-dir=.venv --exclude-dir=docs \
   -l 2>/dev/null \
   | grep -v 'test_subprocess_settings\.sh' \
   | grep -v 'subprocess-permission-gap\.md' || true)
@@ -287,6 +287,69 @@ assert "t2e_tilde_expanded" \
   "grep -q '${isolated_home}/custom-settings.json' '${t2e_args}'" \
   "tilde expanded to HOME in settings path" \
   "tilde NOT expanded (literal ~ in path)"
+
+# ============================================================================
+# Test 2f: --setting-sources "" passed to subprocess
+# ============================================================================
+printf "\n--- test2f: --setting-sources flag passed to subprocess ---\n"
+
+t2f_dir="${tmp_dir}/t2f"
+mkdir -p "${t2f_dir}/bin"
+
+t2f_args="${t2f_dir}/claude_args.txt"
+cat >"${t2f_dir}/bin/claude" <<MOCK_EOF
+#!/bin/bash
+printf '%s\n' "\$@" > "${t2f_args}"
+exit 0
+MOCK_EOF
+chmod +x "${t2f_dir}/bin/claude"
+
+setup_project_dir "${t2f_dir}/project" "${TIER_CONFIG}"
+
+# Create the project-local settings file
+mkdir -p "${t2f_dir}/project/.claude"
+cat >"${t2f_dir}/project/.claude/subprocess-settings.json" <<'SETTINGS_EOF'
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "disableAllHooks": true,
+  "skipDangerousModePermissionPrompt": true
+}
+SETTINGS_EOF
+
+t2f_file="${t2f_dir}/test.sh"
+create_bad_shell_file "${t2f_file}"
+
+t2f_json='{"tool_input":{"file_path":"'"${t2f_file}"'"}}'
+
+export t2f_exit=0
+echo "${t2f_json}" \
+  | PATH="${t2f_dir}/bin:${PATH}" \
+    CLAUDE_PROJECT_DIR="${t2f_dir}/project" \
+    HOOK_SESSION_PID="t2f_$$" \
+    bash "${hook_dir}/multi_linter.sh" >/dev/null 2>&1 || t2f_exit=$?
+
+assert "t2f_setting_sources_flag" \
+  "grep -q '\-\-setting-sources' '${t2f_args}'" \
+  "--setting-sources flag passed to subprocess" \
+  "--setting-sources flag NOT passed (recursion risk!)"
+
+# Verify the argument after --setting-sources is empty (clears default sources)
+# Args are one-per-line in the captured file, so the line after --setting-sources
+# should be empty or the next flag
+t2f_sources_line=$(grep -n '\-\-setting-sources' "${t2f_args}" 2>/dev/null | head -1 | cut -d: -f1)
+if [[ -n "${t2f_sources_line}" ]]; then
+  t2f_next_line=$((t2f_sources_line + 1))
+  t2f_next_val=$(sed -n "${t2f_next_line}p" "${t2f_args}")
+  assert "t2f_empty_sources_value" \
+    "[[ -z '${t2f_next_val}' ]]" \
+    "--setting-sources value is empty string (clears defaults)" \
+    "--setting-sources value is '${t2f_next_val}' (expected empty)"
+else
+  assert "t2f_empty_sources_value" \
+    "false" \
+    "n/a" \
+    "--setting-sources line not found in args"
+fi
 
 # === Summary ===
 printf "\n=== Summary ===\n"
