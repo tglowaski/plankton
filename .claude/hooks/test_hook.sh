@@ -1757,6 +1757,122 @@ DIS_EOF
 
 
   echo ""
+  echo "--- set-e Hardening Tests ---"
+
+  # Structural: subprocess captures exit code with || (BUG 3 fix)
+  if grep -q '|| subprocess_exit=\$?' "${script_dir}/multi_linter.sh"; then
+    echo "PASS subprocess_exit_capture: subprocess uses || to capture exit code"
+    passed=$((passed + 1))
+  else
+    echo "FAIL subprocess_exit_capture: subprocess missing || exit capture (BUG 3)"
+    failed=$((failed + 1))
+  fi
+
+  # Structural: subprocess_exit initialized before invocation
+  if grep -q 'subprocess_exit=0' "${script_dir}/multi_linter.sh"; then
+    echo "PASS subprocess_exit_init: subprocess_exit initialized to 0"
+    passed=$((passed + 1))
+  else
+    echo "FAIL subprocess_exit_init: subprocess_exit not initialized"
+    failed=$((failed + 1))
+  fi
+
+  # Structural: no bare subprocess_exit=$? (would be dead code under set -e)
+  if grep -qE '^\s+subprocess_exit=\$\?\s*$' "${script_dir}/multi_linter.sh"; then
+    echo "FAIL no_bare_subprocess_exit: bare subprocess_exit=\$? still present"
+    failed=$((failed + 1))
+  else
+    echo "PASS no_bare_subprocess_exit: no bare subprocess_exit=\$? (BUG 3 fixed)"
+    passed=$((passed + 1))
+  fi
+
+  # Structural: hook_json() jaq call has || printf fallback (Category D)
+  if grep -q 'systemMessage.*2>/dev/null || printf' "${script_dir}/multi_linter.sh"; then
+    echo "PASS hook_json_jaq_fallback: hook_json() has printf fallback for jaq failure"
+    passed=$((passed + 1))
+  else
+    echo "FAIL hook_json_jaq_fallback: hook_json() missing jaq fallback"
+    failed=$((failed + 1))
+  fi
+
+  # Structural: jaq -s '.' pipelines have || fallbacks (Category A hardening)
+  local jaq_s_fallbacks
+  jaq_s_fallbacks=$(grep -c "jaq -s '\.')" "${script_dir}/multi_linter.sh" || true)
+  local jaq_s_with_fallback
+  jaq_s_with_fallback=$(grep -c "jaq -s '\.') ||" "${script_dir}/multi_linter.sh" || true)
+  if [[ "${jaq_s_with_fallback}" -ge 5 ]]; then
+    echo "PASS jaq_pipeline_fallbacks: ${jaq_s_with_fallback}/${jaq_s_fallbacks} jaq -s '.' pipelines have || fallback"
+    passed=$((passed + 1))
+  else
+    echo "FAIL jaq_pipeline_fallbacks: ${jaq_s_with_fallback}/${jaq_s_fallbacks} (expected at least 5 with fallback)"
+    failed=$((failed + 1))
+  fi
+
+  # Structural: standalone jaq -n violation assignments have || fallbacks (Category B)
+  local jaq_n_fallbacks=0
+  grep -q '|| json_violation=' "${script_dir}/multi_linter.sh" && jaq_n_fallbacks=$((jaq_n_fallbacks + 1))
+  grep -q '|| toml_violation=' "${script_dir}/multi_linter.sh" && jaq_n_fallbacks=$((jaq_n_fallbacks + 1))
+  if [[ "${jaq_n_fallbacks}" -ge 2 ]]; then
+    echo "PASS jaq_standalone_fallbacks: ${jaq_n_fallbacks} standalone jaq -n fallbacks found"
+    passed=$((passed + 1))
+  else
+    echo "FAIL jaq_standalone_fallbacks: ${jaq_n_fallbacks} fallback(s) (expected at least 2)"
+    failed=$((failed + 1))
+  fi
+
+  # Structural: semgrep_files pipeline has || fallback (Category C)
+  if grep -q '|| semgrep_files=' "${script_dir}/multi_linter.sh"; then
+    echo "PASS semgrep_files_fallback: semgrep_files pipeline has || fallback"
+    passed=$((passed + 1))
+  else
+    echo "FAIL semgrep_files_fallback: semgrep_files missing || fallback"
+    failed=$((failed + 1))
+  fi
+
+  # Structural: hadolint_version pipeline has || fallback (Category C)
+  if grep -q '|| hadolint_version=' "${script_dir}/multi_linter.sh"; then
+    echo "PASS hadolint_version_fallback: hadolint_version has || fallback"
+    passed=$((passed + 1))
+  else
+    echo "FAIL hadolint_version_fallback: hadolint_version missing || fallback"
+    failed=$((failed + 1))
+  fi
+
+  # Functional: subprocess failure still produces valid JSON (BUG 3 regression test)
+  local mock_claude_dir="${temp_dir}/mock_claude_bin"
+  mkdir -p "${mock_claude_dir}"
+  # Create mock 'claude' that always exits 1 (simulates subprocess crash)
+  printf '#!/bin/bash\nexit 1\n' > "${mock_claude_dir}/claude"
+  chmod +x "${mock_claude_dir}/claude"
+  # Create mock 'timeout' that passes through to the command
+  printf '#!/bin/bash\nshift; exec "$@"\n' > "${mock_claude_dir}/timeout"
+  chmod +x "${mock_claude_dir}/timeout"
+
+  # Python file with violation (F841 unused variable) to trigger subprocess delegation
+  local bug3_file="${temp_dir}/bug3_test.py"
+  printf '"""Module docstring."""\n\n\ndef foo():\n    """Do nothing."""\n    unused_var = 1\n    return 42\n' > "${bug3_file}"
+
+  local bug3_json='{"tool_input": {"file_path": "'"${bug3_file}"'"}}'
+  set +e
+  local bug3_stdout
+  bug3_stdout=$(echo "${bug3_json}" | \
+    PATH="${mock_claude_dir}:${PATH}" \
+    CLAUDE_PROJECT_DIR="${fixture_project_dir}" \
+    "${script_dir}/multi_linter.sh" 2>/dev/null)
+  local bug3_exit=$?
+  set -e
+
+  # Hook MUST produce JSON on stdout even when subprocess crashes
+  if echo "${bug3_stdout}" | grep -q '"continue"'; then
+    echo "PASS bug3_subprocess_failure_json: valid JSON when subprocess exits non-zero (exit=${bug3_exit})"
+    passed=$((passed + 1))
+  else
+    echo "FAIL bug3_subprocess_failure_json: no valid JSON after subprocess failure (exit=${bug3_exit})"
+    echo "   stdout: ${bug3_stdout}"
+    failed=$((failed + 1))
+  fi
+
+  echo ""
   echo "--- ShellCheck Compliance Tests ---"
 
   # Test: all hook scripts pass shellcheck

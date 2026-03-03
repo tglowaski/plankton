@@ -36,7 +36,7 @@ hook_json() {
   local msg="${1:-}"
   if [[ -n "${msg}" ]]; then
     # shellcheck disable=SC2016 # $m is a jaq variable, not shell
-    jaq -n --arg m "${msg}" '{"continue":true,"systemMessage":$m}'
+    jaq -n --arg m "${msg}" '{"continue":true,"systemMessage":$m}' 2>/dev/null || printf '{"continue":true}\n'
   else
     printf '{"continue":true}\n'
   fi
@@ -576,14 +576,14 @@ SETTINGS_EOF
   if [[ -n "${disallowed_tools}" ]]; then
     disallowed_flag=(--disallowedTools "${disallowed_tools}")
   fi
+  subprocess_exit=0
   ${timeout_cmd} env -u CLAUDECODE "${claude_cmd}" -p "${prompt}" \
     --dangerously-skip-permissions \
     --settings "${settings_file}" \
     "${disallowed_flag[@]}" \
     --max-turns "${tier_max_turns}" \
     --model "${model}" \
-    "${fp}" >/dev/null
-  subprocess_exit=$?
+    "${fp}" >/dev/null || subprocess_exit=$?
 
   # Detect file modification
   local file_hash_after=""
@@ -907,7 +907,7 @@ _handle_semgrep_session() {
       touch "${session_file}.done"
       if command -v semgrep >/dev/null 2>&1 && [[ -f "${CLAUDE_PROJECT_DIR:-.}/.semgrep.yml" ]]; then
         local semgrep_files
-        semgrep_files=$(sort -u "${session_file}" | tr '\n' ' ')
+        semgrep_files=$(sort -u "${session_file}" | tr '\n' ' ') || semgrep_files=""
         local semgrep_result
         # shellcheck disable=SC2086  # Intentional word splitting for file list
         semgrep_result=$(semgrep --json --config "${CLAUDE_PROJECT_DIR:-.}/.semgrep.yml" \
@@ -1229,7 +1229,7 @@ case "${file_path}" in
           msg=$(echo "${line}" | sed -E 's/^[^:]*:[0-9]+:[0-9]+: [A-Z0-9]+ (.*)/\1/')
           jaq -n --arg l "${line_num}" --arg c "${col_num}" --arg cd "${code}" --arg m "${msg}" \
             '{line:($l|tonumber),column:($c|tonumber),code:$cd,message:$m,linter:"flake8-pydantic"}'
-        done | jaq -s '.')
+        done | jaq -s '.') || pyd_json="[]"
         if [[ -n "${pyd_json}" ]]; then
           _merged=$(echo "${collected_violations}" "${pyd_json}" \
             | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
@@ -1256,7 +1256,7 @@ case "${file_path}" in
           msg=$(echo "${line}" | sed -E 's/^[^:]*:[0-9]+: (.*)/\1/')
           jaq -n --arg l "${line_num}" --arg m "${msg}" \
             '{line:($l|tonumber),column:1,code:"VULTURE",message:$m,linter:"vulture"}'
-        done | jaq -s '.')
+        done | jaq -s '.') || vulture_json="[]"
         if [[ -n "${vulture_json}" ]] && [[ "${vulture_json}" != "[]" ]]; then
           _merged=$(echo "${collected_violations}" "${vulture_json}" \
             | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
@@ -1308,7 +1308,7 @@ case "${file_path}" in
           jaq -n --arg l "${line_num}" --arg c "${col_num}" --arg cd "${code}" \
             --arg m "${msg}" \
             '{line:($l|tonumber),column:($c|tonumber),code:$cd,message:$m,linter:"flake8-async"}'
-        done | jaq -s '.')
+        done | jaq -s '.') || async_json="[]"
         if [[ -n "${async_json}" ]]; then
           _merged=$(echo "${collected_violations}" \
             "${async_json}" | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
@@ -1365,7 +1365,7 @@ case "${file_path}" in
           code=$(echo "${line}" | sed -E 's/.*\(([^)]+)\).*/\1/' || echo "unknown")
           jaq -n --arg l "${line_num}" --arg c "${col_num}" --arg cd "${code}" --arg m "${msg}" \
             '{line:($l|tonumber),column:($c|tonumber),code:$cd,message:$m,linter:"yamllint"}'
-        done | jaq -s '.')
+        done | jaq -s '.') || yaml_json="[]"
         if [[ -n "${yaml_json}" ]]; then
           _merged=$(echo "${collected_violations}" "${yaml_json}" \
             | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
@@ -1385,7 +1385,7 @@ case "${file_path}" in
       # Collect JSON syntax error
       # shellcheck disable=SC2016 # $m is a jaq variable, not shell
       json_violation=$(jaq -n --arg m "${json_error}" \
-        '[{line:1,column:1,code:"JSON_SYNTAX",message:$m,linter:"jaq"}]')
+        '[{line:1,column:1,code:"JSON_SYNTAX",message:$m,linter:"jaq"}]') || json_violation="[]"
       _merged=$(echo "${collected_violations}" "${json_violation}" \
         | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
       [[ -n "${_merged}" ]] && collected_violations="${_merged}"
@@ -1424,7 +1424,7 @@ case "${file_path}" in
     # Requires hadolint >= 2.12.0 for disable-ignore-pragma support
     if command -v hadolint >/dev/null 2>&1; then
       # Version check (warn if too old, don't block)
-      hadolint_version=$(hadolint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
+      hadolint_version=$(hadolint --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1) || hadolint_version=""
       if [[ -n "${hadolint_version}" ]]; then
         major="${hadolint_version%%.*}"
         minor="${hadolint_version#*.}"
@@ -1468,7 +1468,7 @@ case "${file_path}" in
         # Collect TOML syntax error
         # shellcheck disable=SC2016
         toml_violation=$(jaq -n --arg m "${taplo_check}" \
-          '[{line:1,column:1,code:"TOML_SYNTAX",message:$m,linter:"taplo"}]')
+          '[{line:1,column:1,code:"TOML_SYNTAX",message:$m,linter:"taplo"}]') || toml_violation="[]"
         _merged=$(echo "${collected_violations}" "${toml_violation}" \
           | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
         [[ -n "${_merged}" ]] && collected_violations="${_merged}"
@@ -1513,7 +1513,7 @@ case "${file_path}" in
           msg=$(echo "${line}" | sed -E 's/.*MD[0-9]+[^[:alnum:]]*(.+)/\1/' | sed 's/^ *//')
           jaq -n --arg l "${line_num}" --arg cd "${code}" --arg m "${msg}" \
             '{line:($l|tonumber),column:1,code:$cd,message:$m,linter:"markdownlint"}'
-        done | jaq -s '.')
+        done | jaq -s '.') || md_json="[]"
         if [[ -n "${md_json}" ]] && [[ "${md_json}" != "[]" ]]; then
           _merged=$(echo "${collected_violations}" "${md_json}" \
             | jaq -s '.[0] + .[1]' 2>/dev/null) || _merged=""
