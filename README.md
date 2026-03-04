@@ -124,13 +124,17 @@ For the full motivation and design story, read the
 
 ```bash
 # Install pre-commit hooks (recommended). This makes the strict
-# runtime-parity gate run automatically on git commit and enables the
-# commit-message policy hook.
-uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+# runtime-parity gate run automatically on git commit, enables the
+# commit-message policy hook, and runs the non-benchmark hook test suite
+# before push.
+uv run pre-commit install --hook-type pre-commit --hook-type commit-msg --hook-type pre-push
 
 # Repo-wide baseline sweep (skip the staged-file strict runtime hook;
 # it is designed for real commits and targeted reruns, not --all-files)
 SKIP=plankton-strict-runtime-commit uv run pre-commit run --all-files
+
+# Run the non-benchmark Plankton hook test suite directly
+./scripts/pre_push_plankton_hooks.sh
 
 # Manually re-run the same strict gate on currently staged files
 make strict

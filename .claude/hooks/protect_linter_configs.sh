@@ -29,6 +29,20 @@ if [[ -z "${file_path}" ]]; then
   exit 0
 fi
 
+# The canonical hook test suite now lives under .claude/hooks/test/.
+# Those files are intentionally editable and must not be treated as immutable
+# hook infrastructure or protected linter configs.
+is_hook_test_path() {
+  local p="$1"
+  if [[ "${p}" == ".claude/hooks/test/"* ]] || [[ "${p}" == *"/.claude/hooks/test/"* ]]; then return 0; fi
+  return 1
+}
+
+if is_hook_test_path "${file_path}"; then
+  echo '{"decision": "approve"}'
+  exit 0
+fi
+
 # Get basename for matching
 basename=$(basename "${file_path}")
 

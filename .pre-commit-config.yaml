@@ -1,6 +1,8 @@
 # Pre-commit hooks for code quality enforcement
-# Install: uv add --dev pre-commit && uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
-# Pre-push: uv run pre-commit install --hook-type pre-push
+# Install: uv add --dev pre-commit
+#   && uv run pre-commit install --hook-type pre-commit --hook-type commit-msg
+#     --hook-type pre-push
+# Pre-push only: uv run pre-commit install --hook-type pre-push
 # Run (repo-wide baseline): SKIP=plankton-strict-runtime-commit uv run pre-commit run --all-files
 
 default_stages: [pre-commit, pre-push]
@@ -134,6 +136,15 @@ repos:
         entry: ./scripts/check_commit_message_no_ai_attribution.sh
         language: system
         stages: [commit-msg]
+
+      # === HOOK TEST SUITE (before push) ===
+      - id: plankton-hooks-pre-push
+        name: plankton (hook test suite)
+        entry: ./scripts/pre_push_plankton_hooks.sh
+        language: system
+        pass_filenames: false
+        require_serial: true
+        stages: [pre-push]
 
 # === INTENTIONAL EXCLUSIONS ===
 # The following tools run in CC hooks and/or CI but NOT in pre-commit:

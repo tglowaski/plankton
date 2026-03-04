@@ -51,7 +51,10 @@ hook_json() {
 
 # Emit JSON and exit clean — ensures Claude Code always receives valid JSON.
 # shellcheck disable=SC2329  # invoked indirectly
-exit_json() { hook_json "${1:-}"; exit 0; }
+exit_json() {
+  hook_json "${1:-}"
+  exit 0
+}
 
 # Emit structured timing diagnostics to stderr and, optionally, to a file.
 # Never writes to stdout. Fail-open by design.
@@ -69,7 +72,8 @@ hook_diag() {
 # Fail-open if jaq is not installed (required for JSON parsing)
 if ! command -v jaq >/dev/null 2>&1; then
   echo "[hook] error: jaq is required but not found. Install: brew install jaq" >&2
-  printf '{"continue":true}\n'; exit 0
+  printf '{"continue":true}\n'
+  exit 0
 fi
 
 # ============================================================================
@@ -191,7 +195,7 @@ is_typescript_enabled() {
   local ts_config
   ts_config=$(echo "${CONFIG_JSON}" | jaq -r '.languages.typescript' 2>/dev/null)
   case "${ts_config}" in
-    false|null) return 1 ;;
+    false | null) return 1 ;;
     true) return 0 ;;
     *) # nested object - check .enabled field
       local enabled
@@ -250,7 +254,7 @@ detect_biome() {
   fi
 
   if [[ -n "${biome_cmd}" ]]; then
-    echo "${biome_cmd}" > "${cache_file}"
+    echo "${biome_cmd}" >"${cache_file}"
     echo "${biome_cmd}"
     return 0
   fi
@@ -387,7 +391,7 @@ spawn_fix_subprocess() {
       if [[ "${matched}" == "false" ]]; then
         echo "[hook:warning] unmatched pattern '${code}', defaulting to haiku" >&2
       fi
-    done <<< "${unmatched_codes}"
+    done <<<"${unmatched_codes}"
   fi
 
   # Resolve per-tier settings
@@ -510,7 +514,6 @@ Do not add comments explaining fixes. Do not refactor beyond what's needed."
     return 0
   fi
 
-
   # Resolve settings file: config override > project-local default
   local settings_file
   settings_file=$(echo "${CONFIG_JSON}" | jaq -r '.subprocess.settings_file // empty' 2>/dev/null) || true
@@ -530,7 +533,7 @@ Do not add comments explaining fixes. Do not refactor beyond what's needed."
       echo "[hook:error] failed to create temp file for settings" >&2
       return 1
     }
-    cat > "${tmpfile}" << 'SETTINGS_EOF'
+    cat >"${tmpfile}" <<'SETTINGS_EOF'
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "disableAllHooks": true,
@@ -540,7 +543,7 @@ SETTINGS_EOF
     if mv "${tmpfile}" "${settings_file}" 2>/dev/null; then
       echo "[hook:warning] created missing ${settings_file}" >&2
     else
-      rm -f "${tmpfile}"  # Lost race - another process created it first
+      rm -f "${tmpfile}" # Lost race - another process created it first
     fi
   fi
   # Use timeout if available (requires GNU coreutils on macOS: brew install coreutils)
@@ -552,7 +555,7 @@ SETTINGS_EOF
 
   # Tool universe for --disallowedTools derivation (pinned to cc_tested_version)
   # Update when upgrading cc_tested_version in config.json
-  local tool_universe="Edit,Read,Write,Bash,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task"
+  local tool_universe="Edit,Read,Write,Bash,Glob,Grep,WebFetch,WebSearch,NotebookEdit,Task,AskUserQuestion,EnterPlanMode,ExitPlanMode"
   local allowed_tools="${tier_tools}"
 
   # Derive disallowed tools: universe minus allowed
@@ -618,7 +621,7 @@ SETTINGS_EOF
   else
     echo "[hook:subprocess] file unchanged" >&2
   fi
-  local delegate_duration=$(( SECONDS - delegate_started ))
+  local delegate_duration=$((SECONDS - delegate_started))
   local _changed="no"
   [[ "${file_hash_before}" != "${file_hash_after}" ]] && _changed="yes"
   hook_diag "phase=delegate_end tool=${tool_name} file=${fp} ftype=${ftype} model=${model} exit=${subprocess_exit} changed=${_changed} duration_s=${delegate_duration}"
@@ -1035,7 +1038,7 @@ handle_typescript() {
 
   # SFC handling (D4): .vue/.svelte/.astro -> Semgrep only, skip Biome
   case "${ext}" in
-    vue|svelte|astro)
+    vue | svelte | astro)
       local sfc_warned="/tmp/.sfc_warned_${ext}_${SESSION_PID}"
       if [[ ! -f "${sfc_warned}" ]]; then
         touch "${sfc_warned}"
@@ -1147,11 +1150,11 @@ case "${file_path}" in
   *.json) file_type="json" ;;
   *.toml) file_type="toml" ;;
   *.md | *.mdx) file_type="markdown" ;;
-  *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts|*.css) file_type="typescript" ;;
-  *.vue|*.svelte|*.astro) file_type="typescript" ;;
+  *.ts | *.tsx | *.js | *.jsx | *.mjs | *.cjs | *.mts | *.cts | *.css) file_type="typescript" ;;
+  *.vue | *.svelte | *.astro) file_type="typescript" ;;
   Dockerfile | Dockerfile.* | */Dockerfile | */Dockerfile.* | *.dockerfile | *.Dockerfile) file_type="dockerfile" ;;
-  *.ipynb) exit_json ;;  # Notebook — no cell-level linting
-  *) exit_json ;; # Unsupported
+  *.ipynb) exit_json ;; # Notebook — no cell-level linting
+  *) exit_json ;;       # Unsupported
 esac
 
 # Determine file type and run appropriate linter
@@ -1505,7 +1508,7 @@ case "${file_path}" in
     fi
     ;;
 
-  *.ts|*.tsx|*.js|*.jsx|*.mjs|*.cjs|*.mts|*.cts|*.css|*.vue|*.svelte|*.astro)
+  *.ts | *.tsx | *.js | *.jsx | *.mjs | *.cjs | *.mts | *.cts | *.css | *.vue | *.svelte | *.astro)
     is_typescript_enabled || exit_json
     handle_typescript "${file_path}"
     ;;
@@ -1620,16 +1623,16 @@ hook_diag "phase=verify_start tool=${tool_name} file=${file_path} ftype=${file_t
 _p1_started=${SECONDS}
 hook_diag "phase=rerun_phase1_start tool=${tool_name} file=${file_path} ftype=${file_type}"
 rerun_phase1 "${file_path}" "${file_type}"
-hook_diag "phase=rerun_phase1_end tool=${tool_name} file=${file_path} ftype=${file_type} duration_s=$(( SECONDS - _p1_started ))"
+hook_diag "phase=rerun_phase1_end tool=${tool_name} file=${file_path} ftype=${file_type} duration_s=$((SECONDS - _p1_started))"
 
 _p2_started=${SECONDS}
 hook_diag "phase=rerun_phase2_start tool=${tool_name} file=${file_path} ftype=${file_type}"
 rerun_phase2 "${file_path}" "${file_type}"
 _remaining_codes=$(echo "${RERUN_PHASE2_RAW:-[]}" | jaq -r '[.[].code] | sort | unique | join(",")' 2>/dev/null || echo "")
-hook_diag "phase=rerun_phase2_end tool=${tool_name} file=${file_path} ftype=${file_type} duration_s=$(( SECONDS - _p2_started )) remaining_count=${RERUN_PHASE2_COUNT} remaining_codes=${_remaining_codes}"
+hook_diag "phase=rerun_phase2_end tool=${tool_name} file=${file_path} ftype=${file_type} duration_s=$((SECONDS - _p2_started)) remaining_count=${RERUN_PHASE2_COUNT} remaining_codes=${_remaining_codes}"
 
 remaining="${RERUN_PHASE2_COUNT}"
-hook_diag "phase=verify_end tool=${tool_name} file=${file_path} ftype=${file_type} remaining_count=${remaining} remaining_codes=${_remaining_codes} duration_s=$(( SECONDS - _verify_started ))"
+hook_diag "phase=verify_end tool=${tool_name} file=${file_path} ftype=${file_type} remaining_count=${remaining} remaining_codes=${_remaining_codes} duration_s=$((SECONDS - _verify_started))"
 
 if [[ "${remaining}" -eq 0 ]]; then
   hook_diag "phase=resolved tool=${tool_name} file=${file_path} ftype=${file_type} remaining=0"
