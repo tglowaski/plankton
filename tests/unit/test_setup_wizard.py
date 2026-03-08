@@ -442,16 +442,41 @@ def test_build_effective_config_uses_existing_and_legacy_exclusions() -> None:
     assert effective["security_linter_exclusions"] == ["tests/"]
 
 
+def test_select_sections_rerun_skip_single_edits(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    prompts_seen: list[str] = []
+
+    def fake_ask(prompt: str, default: bool = True) -> bool:
+        prompts_seen.append(prompt)
+        if prompt == "Make targeted edits to specific sections?":
+            return False
+        raise AssertionError(f"Unexpected prompt when single-edit mode declined: {prompt!r}")
+
+    monkeypatch.setattr(setup_module.Confirm, "ask", fake_ask)
+    selected = setup_module.select_sections(has_existing_config=True)
+    assert selected["languages"] is False
+    assert selected["phases"] is False
+    assert selected["security_exclusions"] is False
+    assert selected["package_managers"] is False
+    assert selected["jscpd"] is False
+    assert selected["subprocess"] is False
+    assert prompts_seen == ["Make targeted edits to specific sections?"]
+
+
 def test_select_sections_defaults_on_rerun(monkeypatch) -> None:
     setup_module = _load_setup_module()
     defaults_seen: dict[str, bool] = {}
 
     def fake_ask(prompt: str, default: bool = True) -> bool:
+        if prompt == "Make targeted edits to specific sections?":
+            defaults_seen[prompt] = default
+            return True
         defaults_seen[prompt] = default
         return default
 
     monkeypatch.setattr(setup_module.Confirm, "ask", fake_ask)
     selected = setup_module.select_sections(has_existing_config=True)
+    assert defaults_seen["Make targeted edits to specific sections?"] is False
     assert selected["languages"] is True
     assert selected["phases"] is True
     assert selected["security_exclusions"] is False
@@ -506,6 +531,284 @@ def test_main_no_sections_selected_does_not_rewrite_existing_config(tmp_path: Pa
 
     setup_module.main()
     assert config_path.read_text(encoding="utf-8") == original
+
+
+def test_setup_hooks_installs_pre_commit_when_missing(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    monkeypatch.chdir(tmp_path)
+
+    hooks_dir = tmp_path / ".claude" / "hooks"
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    (hooks_dir / "multi_linter.sh").write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    (tmp_path / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
+
+    monkeypatch.setattr(setup_module, "HOOKS_DIR", hooks_dir)
+    monkeypatch.setattr(setup_module.Confirm, "ask", lambda *args, **kwargs: True)
+    monkeypatch.setattr(setup_module.os, "chmod", lambda *args, **kwargs: None)
+
+    installed = {"pre_commit": False}
+    install_attempts: list[tuple[list[str], str]] = []
+    run_calls: list[tuple[list[str], bool]] = []
+
+    def fake_which(tool: str) -> str | None:
+        if tool == "pre-commit":
+            return "/usr/bin/pre-commit" if installed["pre_commit"] else None
+        if tool == "uv":
+            return "/usr/bin/uv"
+        return None
+
+    def fake_run_install(command: list[str], description: str) -> bool:
+        install_attempts.append((command, description))
+        if command == ["uv", "tool", "install", "pre-commit"]:
+            installed["pre_commit"] = True
+            return True
+        return False
+
+    def fake_subprocess_run(command: list[str], check: bool = True, **kwargs):
+        run_calls.append((command, check))
+        return types.SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(setup_module.shutil, "which", fake_which)
+    monkeypatch.setattr(setup_module, "_run_install_command", fake_run_install)
+    monkeypatch.setattr(setup_module.subprocess, "run", fake_subprocess_run)
+
+    setup_module.setup_hooks()
+
+    assert install_attempts
+    assert install_attempts[0][0] == ["uv", "tool", "install", "pre-commit"]
+    assert run_calls == [(["pre-commit", "install"], True)]
+
+
+def test_ensure_pip_user_bin_on_path_adds_macos_paths(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    fake_base = tmp_path / "Library" / "Python"
+    (fake_base / "3.9" / "bin").mkdir(parents=True)
+    (fake_base / "3.13" / "bin").mkdir(parents=True)
+
+    monkeypatch.setattr(setup_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "/usr/bin:/usr/local/bin")
+
+    changed = setup_module._ensure_pip_user_bin_on_path()
+    assert changed is True
+    path_entries = os.environ["PATH"].split(os.pathsep)
+    assert str(fake_base / "3.13" / "bin") in path_entries
+    assert str(fake_base / "3.9" / "bin") in path_entries
+
+
+def test_install_pre_commit_resolves_macos_bin_path(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+
+    installed = {"pre_commit": False}
+    path_calls: list[str] = []
+
+    def fake_which(tool: str) -> str | None:
+        if tool == "pre-commit":
+            return "/usr/bin/pre-commit" if installed["pre_commit"] else None
+        if tool == "python3":
+            return "/usr/bin/python3"
+        return None
+
+    def fake_run_install(command: list[str], description: str) -> bool:
+        if "python3" in command[0]:
+            installed["pre_commit"] = True
+            return True
+        return False
+
+    monkeypatch.setattr(setup_module.shutil, "which", fake_which)
+    monkeypatch.setattr(setup_module, "_run_install_command", fake_run_install)
+    monkeypatch.setattr(
+        setup_module,
+        "_ensure_local_bin_on_path",
+        lambda show_hint=False: path_calls.append("local_bin") or False,
+    )
+    monkeypatch.setattr(
+        setup_module,
+        "_ensure_pip_user_bin_on_path",
+        lambda: path_calls.append("pip_user") or False,
+    )
+
+    result = setup_module._install_pre_commit()
+    assert result is True
+    assert "local_bin" in path_calls
+    assert "pip_user" in path_calls
+
+
+def test_install_pre_commit_skips_pip_user_path_for_uv(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+
+    installed = {"pre_commit": False}
+    path_calls: list[str] = []
+
+    def fake_which(tool: str) -> str | None:
+        if tool == "pre-commit":
+            return "/usr/bin/pre-commit" if installed["pre_commit"] else None
+        if tool == "uv":
+            return "/usr/bin/uv"
+        return None
+
+    def fake_run_install(command: list[str], description: str) -> bool:
+        if command[0] == "uv":
+            installed["pre_commit"] = True
+            return True
+        return False
+
+    monkeypatch.setattr(setup_module.shutil, "which", fake_which)
+    monkeypatch.setattr(setup_module, "_run_install_command", fake_run_install)
+    monkeypatch.setattr(
+        setup_module,
+        "_ensure_local_bin_on_path",
+        lambda show_hint=False: path_calls.append("local_bin") or False,
+    )
+    monkeypatch.setattr(
+        setup_module,
+        "_ensure_pip_user_bin_on_path",
+        lambda: path_calls.append("pip_user") or False,
+    )
+
+    result = setup_module._install_pre_commit()
+    assert result is True
+    assert "local_bin" in path_calls
+    assert "pip_user" not in path_calls
+
+
+def test_ensure_pip_user_bin_on_path_noop_when_already_in_path(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    fake_base = tmp_path / "Library" / "Python"
+    bin_dir = fake_base / "3.13" / "bin"
+    bin_dir.mkdir(parents=True)
+    monkeypatch.setattr(setup_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}/usr/bin")
+
+    assert setup_module._ensure_pip_user_bin_on_path() is False
+
+
+def test_ensure_pip_user_bin_on_path_prefers_higher_versions(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    fake_base = tmp_path / "Library" / "Python"
+    for ver in ("3.9", "3.11", "3.13"):
+        (fake_base / ver / "bin").mkdir(parents=True)
+    monkeypatch.setattr(setup_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    setup_module._ensure_pip_user_bin_on_path()
+    path_entries = os.environ["PATH"].split(os.pathsep)
+    idx_13 = path_entries.index(str(fake_base / "3.13" / "bin"))
+    idx_9 = path_entries.index(str(fake_base / "3.9" / "bin"))
+    assert idx_13 < idx_9, "3.13 should appear before 3.9 in PATH (higher version = higher priority)"
+
+
+def test_ensure_pip_user_bin_on_path_preserves_priority_with_partial_presence(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    fake_base = tmp_path / "Library" / "Python"
+    for ver in ("3.9", "3.11", "3.13"):
+        (fake_base / ver / "bin").mkdir(parents=True)
+    monkeypatch.setattr(setup_module.Path, "home", lambda: tmp_path)
+    path_13 = str(fake_base / "3.13" / "bin")
+    monkeypatch.setenv("PATH", f"/usr/bin{os.pathsep}{path_13}{os.pathsep}/usr/local/bin")
+
+    assert setup_module._ensure_pip_user_bin_on_path() is True
+    path_entries = os.environ["PATH"].split(os.pathsep)
+    idx_13 = path_entries.index(str(fake_base / "3.13" / "bin"))
+    idx_11 = path_entries.index(str(fake_base / "3.11" / "bin"))
+    idx_9 = path_entries.index(str(fake_base / "3.9" / "bin"))
+    assert idx_13 < idx_11 < idx_9, f"Expected 3.13 < 3.11 < 3.9 in PATH, got indices {idx_13}, {idx_11}, {idx_9}"
+
+
+def test_ensure_pip_user_bin_on_path_noop_when_no_dirs(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    monkeypatch.setattr(setup_module.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    changed = setup_module._ensure_pip_user_bin_on_path()
+    assert changed is False
+
+
+def test_install_pre_commit_hooks_surfaces_stderr_on_failure(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    printed: list[str] = []
+    monkeypatch.setattr(setup_module.console, "print", lambda msg: printed.append(str(msg)))
+
+    import subprocess as _subprocess
+
+    error = _subprocess.CalledProcessError(1, ["pre-commit", "install"])
+    error.stderr = b"hook-install: permission denied"
+
+    def fake_run(command, *, check=False, capture_output=False):
+        raise error
+
+    monkeypatch.setattr(setup_module.subprocess, "run", fake_run)
+
+    setup_module._install_pre_commit_hooks()
+
+    assert any("pre-commit install failed" in msg for msg in printed)
+    assert any("permission denied" in msg for msg in printed)
+
+
+def test_install_pre_commit_hooks_handles_missing_binary(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    printed: list[str] = []
+    monkeypatch.setattr(setup_module.console, "print", lambda msg: printed.append(str(msg)))
+
+    def fake_run(command, *, check=False, capture_output=False):
+        raise FileNotFoundError("No such file or directory: 'pre-commit'")
+
+    monkeypatch.setattr(setup_module.subprocess, "run", fake_run)
+
+    setup_module._install_pre_commit_hooks()
+
+    assert any("pre-commit install failed" in msg for msg in printed)
+    assert any("not found" in msg for msg in printed)
+
+
+def test_install_pre_commit_returns_false_when_all_methods_fail(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+
+    def fake_which(tool: str) -> str | None:
+        if tool in ("uv", "pipx", "python3"):
+            return f"/usr/bin/{tool}"
+        return None
+
+    monkeypatch.setattr(setup_module.shutil, "which", fake_which)
+    monkeypatch.setattr(setup_module, "_run_install_command", lambda *a, **kw: False)
+    monkeypatch.setattr(setup_module, "_ensure_local_bin_on_path", lambda **kw: False)
+    monkeypatch.setattr(setup_module, "_ensure_pip_user_bin_on_path", lambda: False)
+
+    assert setup_module._install_pre_commit() is False
+
+
+def test_ensure_pre_commit_ready_shows_manual_hint_on_failure(tmp_path: Path, monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / ".pre-commit-config.yaml").write_text("repos: []\n", encoding="utf-8")
+    printed: list[str] = []
+
+    monkeypatch.setattr(setup_module.console, "print", lambda msg: printed.append(str(msg)))
+    monkeypatch.setattr(setup_module.shutil, "which", lambda tool: None)
+    monkeypatch.setattr(setup_module.Confirm, "ask", lambda *a, **kw: True)
+    monkeypatch.setattr(setup_module, "_install_pre_commit", lambda: False)
+
+    setup_module._ensure_pre_commit_ready()
+
+    assert any("Could not install pre-commit" in msg for msg in printed)
+    assert any("uv tool install pre-commit" in msg for msg in printed)
+
+
+def test_check_tools_reports_required_scope_and_status(monkeypatch) -> None:
+    setup_module = _load_setup_module()
+    printed: list[str] = []
+
+    monkeypatch.setattr(setup_module, "_ensure_local_bin_on_path", lambda *args, **kwargs: False)
+    monkeypatch.setattr(setup_module, "_guided_install_missing_tools", lambda missing: [])
+    monkeypatch.setattr(setup_module.shutil, "which", lambda tool: None)
+    monkeypatch.setattr(setup_module.console, "print", lambda msg: printed.append(str(msg)))
+
+    setup_module.check_tools()
+
+    tools_line = next((msg for msg in printed if "Required tools:" in msg), None)
+    assert tools_line is not None
+    for tool in setup_module.REQUIRED_TOOLS:
+        assert tool in tools_line
+    assert any("Required tool status:" in msg for msg in printed)
 
 
 def test_edit_list_items_add_and_remove(monkeypatch) -> None:

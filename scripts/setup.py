@@ -414,6 +414,9 @@ def select_sections(has_existing_config: bool) -> dict[str, bool]:
         "subprocess": not has_existing_config,
     }
 
+    if has_existing_config and not Confirm.ask("Make targeted edits to specific sections?", default=False):
+        return {key: False for key in defaults}
+
     prompts = [
         ("languages", "Edit language enforcement settings?"),
         ("phases", "Edit phases (auto_format, subprocess_delegation)?"),
@@ -453,6 +456,38 @@ def _ensure_local_bin_on_path(show_hint: bool = False) -> bool:
     if show_hint:
         console.print("  [yellow]![/yellow] Added ~/.local/bin to PATH for this setup run.")
         console.print(f"  [yellow]Persist:[/yellow] {_path_persist_hint()}")
+    return True
+
+
+def _ensure_pip_user_bin_on_path() -> bool:
+    """Ensure macOS pip --user script dirs are on PATH.
+
+    pip --user installs scripts to ~/Library/Python/<version>/bin on macOS
+    (system Python), unlike ~/.local/bin on Linux. Glob all version dirs.
+    """
+    macos_pip_base = Path.home() / "Library" / "Python"
+    if not macos_pip_base.exists():
+        return False
+
+    def _version_key(p: Path) -> tuple[int, ...]:
+        try:
+            return tuple(int(x) for x in p.parent.name.split("."))
+        except ValueError:
+            return (0,)
+
+    # Sort descending so highest version (e.g. 3.13) gets highest PATH priority
+    all_bin_dirs = sorted(macos_pip_base.glob("*/bin"), key=_version_key, reverse=True)
+    if not all_bin_dirs:
+        return False
+
+    bin_dir_strs = {str(d) for d in all_bin_dirs}
+    current_path = os.environ.get("PATH", "")
+    remaining = [e for e in current_path.split(os.pathsep) if e not in bin_dir_strs]
+    new_path = os.pathsep.join([str(d) for d in all_bin_dirs] + remaining)
+
+    if current_path == new_path:
+        return False
+    os.environ["PATH"] = new_path
     return True
 
 
@@ -619,6 +654,33 @@ def _install_jaq() -> bool:  # noqa: PLR0911
     return False
 
 
+def _install_pre_commit() -> bool:
+    """Attempt to install pre-commit using available package tooling."""
+    install_commands: list[tuple[list[str], str]] = []
+    if shutil.which("uv"):
+        install_commands.append((["uv", "tool", "install", "pre-commit"], "Installing pre-commit via uv tool"))
+    if shutil.which("pipx"):
+        install_commands.append((["pipx", "install", "pre-commit"], "Installing pre-commit via pipx"))
+
+    # pip --user is acceptable here: the setup wizard bootstraps tooling
+    # before hooks are active, so enforce_package_managers won't block it.
+    python_cmd = shutil.which("python3") or shutil.which("python")
+    if python_cmd:
+        install_commands.append(
+            ([python_cmd, "-m", "pip", "install", "--user", "pre-commit"], "Installing pre-commit via pip --user")
+        )
+
+    for command, description in install_commands:
+        if not _run_install_command(command, description):
+            continue
+        _ensure_local_bin_on_path(show_hint=True)
+        if "--user" in command:
+            _ensure_pip_user_bin_on_path()
+        if shutil.which("pre-commit"):
+            return True
+    return False
+
+
 def _guided_install_missing_tools(missing_required: list[str]) -> list[str]:
     if not missing_required:
         return []
@@ -662,14 +724,19 @@ def check_tools():
     console.print("[bold blue]Checking System Dependencies...[/bold blue]")
     _ensure_local_bin_on_path()
     missing_required = []
+    required_tools = list(REQUIRED_TOOLS.keys())
+    console.print(f"  Required tools: {', '.join(required_tools)}")
+    found_required = 0
 
     for tool, desc in REQUIRED_TOOLS.items():
         path = shutil.which(tool)
         if path:
             console.print(f"  [green]✓[/green] {tool} found at {path}")
+            found_required += 1
         else:
             console.print(f"  [red]✗[/red] {tool} NOT found. {desc}")
             missing_required.append(tool)
+    console.print(f"  Required tool status: {found_required}/{len(required_tools)} present")
 
     if missing_required:
         missing_required = _guided_install_missing_tools(missing_required)
@@ -953,6 +1020,40 @@ def configure_selected_sections(
     return generated
 
 
+def _install_pre_commit_hooks() -> None:
+    console.print("  Installing pre-commit hooks...")
+    try:
+        subprocess.run(["pre-commit", "install"], check=True, capture_output=True)  # noqa: S607  # nosec B603 B607
+        console.print("    [green]✓[/green] pre-commit hooks installed")
+    except FileNotFoundError:
+        console.print("    [red]✗[/red] pre-commit install failed: binary not found in PATH")
+    except subprocess.CalledProcessError as exc:
+        detail = (exc.stderr or b"").decode("utf-8", errors="replace").strip()
+        console.print(f"    [red]✗[/red] pre-commit install failed{': ' + detail if detail else ''}")
+
+
+def _ensure_pre_commit_ready() -> None:
+    if not Path(".pre-commit-config.yaml").exists():
+        return
+
+    if shutil.which("pre-commit"):
+        _install_pre_commit_hooks()
+        return
+
+    console.print("  [yellow]![/yellow] .pre-commit-config.yaml found but 'pre-commit' not installed.")
+    if not Confirm.ask("Install pre-commit now?", default=True):
+        console.print("  [yellow]![/yellow] Skipping pre-commit installation.")
+        return
+
+    if not _install_pre_commit():
+        console.print("  [red]✗[/red] Could not install pre-commit automatically.")
+        console.print("  [yellow]Manual:[/yellow] uv tool install pre-commit")
+        return
+
+    console.print("  [green]✓[/green] pre-commit installed")
+    _install_pre_commit_hooks()
+
+
 def setup_hooks():
     """Ensure hooks directory exists and scripts are executable."""
     console.print("\n[bold blue]Setting up Hooks...[/bold blue]")
@@ -971,17 +1072,7 @@ def setup_hooks():
         os.chmod(script, 0o755)  # noqa: S103  # nosec B103
         console.print(f"    [green]✓[/green] chmod +x {script.name}")
 
-    # Check pre-commit
-    if Path(".pre-commit-config.yaml").exists():
-        if shutil.which("pre-commit"):
-            console.print("  Installing pre-commit hooks...")
-            try:
-                subprocess.run(["pre-commit", "install"], check=True)  # noqa: S607  # nosec B603 B607
-                console.print("    [green]✓[/green] pre-commit installed")
-            except subprocess.CalledProcessError:
-                console.print("    [red]✗[/red] pre-commit install failed")
-        else:
-            console.print("  [yellow]![/yellow] .pre-commit-config.yaml found but 'pre-commit' not installed.")
+    _ensure_pre_commit_ready()
 
 
 @app.command()
@@ -1005,7 +1096,7 @@ def main():
     new_config: dict[str, Any] | None = None
     if not any(section_selection.values()):
         if existing_config:
-            console.print("  [yellow]![/yellow] No sections selected; existing configuration will be kept unchanged.")
+            console.print("  Existing configuration will be kept unchanged.")
         else:
             console.print("  [red]✗[/red] No sections selected and no existing config found; aborting.")
             raise typer.Exit(code=1)
